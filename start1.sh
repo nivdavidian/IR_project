@@ -38,20 +38,3 @@ gcloud compute instances create $INSTANCE_NAME \
   --tags=http-server
 # monitor instance creation log using this command. When done (4-5 minutes) terminate using Ctrl+C
 gcloud compute instances tail-serial-port-output $INSTANCE_NAME --zone $ZONE
-
-# 4. Secure copy your app to the VM
-gcloud compute scp ~/IR_project/search_frontend.py $GOOGLE_ACCOUNT_NAME@$INSTANCE_NAME:/home/$GOOGLE_ACCOUNT_NAME
-
-# 5. SSH to your VM and start the app
-gcloud compute ssh $GOOGLE_ACCOUNT_NAME@$INSTANCE_NAME
-python3 search_frontend.py
-
-################################################################################
-# Clean up commands to undo the above set up and avoid unnecessary charges
-gcloud compute instances delete -q $INSTANCE_NAME --zone "us-central1-c"
-# make sure there are no lingering instances
-gcloud compute instances list
-# delete firewall rule
-gcloud compute firewall-rules delete -q default-allow-http-8080
-# delete external addresses
-gcloud compute addresses delete -q $IP_NAME --region $REGION
