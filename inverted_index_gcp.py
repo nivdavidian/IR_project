@@ -16,7 +16,7 @@ from contextlib import closing
 
 
 # Let's start with a small block size of 30 bytes just to test things out. 
-BLOCK_SIZE = 2**12
+BLOCK_SIZE = 4*(10**6) # 4Mb
 
 class MultiFileWriter:
     """ Sequential binary writer to multiple files of up to BLOCK_SIZE each. """
