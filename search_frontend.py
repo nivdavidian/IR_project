@@ -1,4 +1,28 @@
 from flask import Flask, request, jsonify
+from inverted_index_gcp import InvertedIndex
+import numpy as np
+from time import time
+
+import nltk
+from nltk.stem.porter import *
+from nltk.corpus import stopwords
+
+nltk.download('stopwords')
+
+english_stopwords = frozenset(stopwords.words('english'))
+corpus_stopwords = ["category", "references", "also", "external", "links", 
+                    "may", "first", "see", "history", "people", "one", "two", 
+                    "part", "thumb", "including", "second", "following", 
+                    "many", "however", "would", "became"]
+
+all_stopwords = english_stopwords.union(corpus_stopwords)
+RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
+
+def tokenize(text):
+
+    tokens = [token.group() for token in RE_WORD.finditer(text.lower())]
+    tokens = [token for token in tokens if not token in all_stopwords]
+    return tokens
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
@@ -73,7 +97,7 @@ def search_title():
         query). 
 
         Test this by navigating to the a URL like:
-         http://YOUR_SERVER_DOMAIN/search_title?query=hello+world
+         http://34.135.249.255:8080/search_title?query=hello+world
         where YOUR_SERVER_DOMAIN is something like XXXX-XX-XX-XX-XX.ngrok.io
         if you're using ngrok on Colab or your external IP on GCP.
     Returns:
@@ -81,12 +105,27 @@ def search_title():
         list of ALL (not just top 100) search results, ordered from best to 
         worst where each element is a tuple (wiki_id, title).
     '''
+    t_start = time()
     res = []
     query = request.args.get('query', '')
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
+    title_index:InvertedIndex = InvertedIndex.read_index('.', 'title_index')
+    query_unique = frozenset(tokenize(query))
+    num_distinct = len(query_unique)
+    pls = [title_index.read_term_pl(w, "title_postings_gcp") for w in query_unique]
+    doc_ids = np.unique([doc_id for pl in pls for doc_id, _ in pl])
+    d = {doc_id: i for i, doc_id in enumerate(doc_ids)}
+    num_docs = len(doc_ids)
 
+    vec = np.zeros(shape=(num_docs, num_distinct))
+    for i, pl in enumerate(pls):
+        for doc_id,_ in pl:
+            vec[d[doc_id]][i] = 1
+    
+    res = sorted([(f"{doc_ids[i]}", f"{acc}") for i, acc in enumerate(np.sum(vec, axis=1))], key=lambda x: x[1], reverse=True)
+    print((time()-t_start))
     # END SOLUTION
     return jsonify(res)
 
