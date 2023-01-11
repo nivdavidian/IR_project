@@ -1,4 +1,4 @@
-INSTANCE_NAME="instance-1"
+INSTANCE_NAME="instance1"
 REGION=us-central1
 ZONE=us-central1-c
 PROJECT_NAME="ex3ir-371721"
