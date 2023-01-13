@@ -127,7 +127,7 @@ def search_title():
         for doc_id,_ in pl:
             vec[d[doc_id]][i] = 1
     
-    res = sorted([(f"{doc_ids[i]}", f"{acc}") for i, acc in enumerate(np.sum(vec, axis=1))], key=lambda x: x[1], reverse=True)
+    res = [(f"{doc_ids[i]}", corpus_d.id_to_title[doc_ids[i]]) for i, _ in sorted(enumerate(np.sum(vec, axis=1)), key=lambda x: x[1], reverse=True)]
     print((time()-t_start))
     # END SOLUTION
     return jsonify(res)
