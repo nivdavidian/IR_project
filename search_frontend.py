@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from inverted_index_gcp import InvertedIndex
 import numpy as np
 from time import time
+from corpus_data import CorpusData
 
 import nltk
 from nltk.stem.porter import *
@@ -17,6 +18,8 @@ corpus_stopwords = ["category", "references", "also", "external", "links",
 
 all_stopwords = english_stopwords.union(corpus_stopwords)
 RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
+
+corpus_d = CorpusData.read_from_blob("corpus_data", "corpus_data.pkl")
 
 def tokenize(text):
 
@@ -63,7 +66,7 @@ def search():
 def search_body():
     ''' Returns up to a 100 search results for the query using TFIDF AND COSINE
         SIMILARITY OF THE BODY OF ARTICLES ONLY. DO NOT use stemming. DO USE the 
-        staff-provided tokenizer from Assignment 3 (GCP part) to do the 
+        staff-pro   vided tokenizer from Assignment 3 (GCP part) to do the 
         tokenization and remove stopwords. 
 
         To issue a query navigate to a URL like:
@@ -80,7 +83,7 @@ def search_body():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-
+    
     # END SOLUTION
     return jsonify(res)
 
