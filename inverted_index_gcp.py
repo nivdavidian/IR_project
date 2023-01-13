@@ -1,22 +1,74 @@
-import pyspark
-import sys
-from collections import Counter, OrderedDict
+from collections import Counter
 import itertools
-from itertools import islice, count, groupby
-import pandas as pd
-import os
-import re
-from operator import itemgetter
-from time import time
 from pathlib import Path
 import pickle
 from google.cloud import storage
 from collections import defaultdict
-from contextlib import closing
 
 
 # Let's start with a small block size of 30 bytes just to test things out. 
 BLOCK_SIZE = 4*(10**6) # 4Mb
+BUCKET_NAME = "ex3ir205557564"
+
+def write_dl(path, dl, bit_limit, num_bytes):
+    MASK = 2**bit_limit-1 #mask last bit of the 2 byte(8 bits)
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blob = bucket.blob(path)
+    mask_15 = 2**bit_limit-1
+    bit_16 = 2**bit_limit
+    with blob.open("wb") as f:
+        for d in dl:
+            hmbiw = 0
+            bit_length = d.bit_length()
+            while(hmbiw + bit_limit < bit_length):
+                f.write(((d&mask_15)|bit_16).to_bytes(num_bytes, 'big'))
+                hmbiw += bit_limit
+                d = d >> bit_limit
+            f.write((d&mask_15).to_bytes(num_bytes,'big'))
+
+def read_dl(path, length, bit_limit, num_bytes):
+    MASK = 2**bit_limit-1 #mask last bit of the 2 byte(8 bits)
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blob = bucket.blob(path)
+    dl = []
+    bs= []
+    with blob.open("rb") as f:
+        bs = f.read()
+    index = 0
+    n = length
+    while(n>0):
+        bytess = []
+        d=0
+        hmi = 0
+        while(int.from_bytes(bs[index:index+num_bytes], 'big') > MASK):
+            d += (int.from_bytes(bs[index:index+num_bytes], 'big')&MASK)<<hmi
+            index += num_bytes
+            hmi+=bit_limit
+        d += (int.from_bytes(bs[index:index+num_bytes], 'big')&MASK)<<hmi
+        dl.append(d)
+        n -= 1
+        index+=num_bytes
+    
+    storage_client.close()
+    del storage_client
+    return dl
+
+def read_from_bucket(folder_name, locs, n_bytes):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(BUCKET_NAME)
+    b = []
+    for f_name, offset in locs:
+        blob = bucket.blob(f"{folder_name}/{f_name}")
+        with blob.open("rb") as f:
+            f.seek(offset)
+            n_read = min(n_bytes, BLOCK_SIZE - offset)
+            b.append(f.read(n_read))
+            n_bytes -= n_read
+    storage_client.close()
+    del storage_client
+    return b''.join(b)
 
 class MultiFileWriter:
     """ Sequential binary writer to multiple files of up to BLOCK_SIZE each. """
@@ -102,6 +154,7 @@ class InvertedIndex:
         -----------
           docs: dict mapping doc_id to list of tokens
         """
+        self.N = 0
         # stores document frequency per term
         self.df = Counter()
         # stores total frequency per term
@@ -152,22 +205,8 @@ class InvertedIndex:
         return state
     
     def read_term_pl(self, w, folder_name):
-        def read_from_bucket(bucket, folder_name, locs, n_bytes):
-            b = []
-            for f_name, offset in locs:
-                blob = bucket.blob(f"{folder_name}/{f_name}")
-                with blob.open("rb") as f:
-                    f.seek(offset)
-                    n_read = min(n_bytes, BLOCK_SIZE - offset)
-                    b.append(f.read(n_read))
-                    n_bytes -= n_read
-            return b''.join(b)
-        bucket_name = "ex3ir205557564"
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        
         locs = self.posting_locs[w]
-        b = read_from_bucket(bucket, folder_name, locs, self.df[w] * TUPLE_SIZE)
+        b = read_from_bucket(folder_name, locs, self.df[w] * TUPLE_SIZE)
         posting_list = []
         for i in range(self.df[w]):
             doc_id = int.from_bytes(b[i*TUPLE_SIZE:i*TUPLE_SIZE+4], 'big')
@@ -179,22 +218,8 @@ class InvertedIndex:
         """ A generator that reads one posting list from disk and yields 
             a (word:str, [(doc_id:int, tf:int), ...]) tuple.
         """
-        def read_from_bucket(bucket, folder_name, locs, n_bytes):
-            b = []
-            for f_name, offset in locs:
-                blob = bucket.blob(f"{folder_name}/{f_name}")
-                with blob.open("rb") as f:
-                    f.seek(offset)
-                    n_read = min(n_bytes, BLOCK_SIZE - offset)
-                    b.append(f.read(n_read))
-                    n_bytes -= n_read
-            return b''.join(b)
-        bucket_name = "ex3ir205557564"
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        
         for w, locs in self.posting_locs.items():
-            b = read_from_bucket(bucket, folder_name, locs, self.df[w] * TUPLE_SIZE)
+            b = read_from_bucket(folder_name, locs, self.df[w] * TUPLE_SIZE)
             posting_list = []
             for i in range(self.df[w]):
                 doc_id = int.from_bytes(b[i*TUPLE_SIZE:i*TUPLE_SIZE+4], 'big')
