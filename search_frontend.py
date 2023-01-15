@@ -217,12 +217,26 @@ def search_anchor():
         list of ALL (not just top 100) search results, ordered from best to 
         worst where each element is a tuple (wiki_id, title).
     '''
+    t_start = time()
     res = []
     query = request.args.get('query', '')
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
+    query_unique = frozenset(tokenize(query))
+    num_distinct = len(query_unique)
+    pls = [anchor_index.read_term_pl(w, "anchor_text_postings_gcp") for w in query_unique]
+    doc_ids = np.unique([doc_id for pl in pls for doc_id, _ in pl])
+    d = {doc_id: i for i, doc_id in enumerate(doc_ids)}
+    num_docs = len(doc_ids)
+
+    vec = np.zeros(shape=(num_docs, num_distinct))
+    for i, pl in enumerate(pls):
+        for doc_id,_ in pl:
+            vec[d[doc_id]][i] = 1
     
+    res = [(f"{doc_ids[i]}", corpus_d.id_to_title[doc_ids[i]]) for i, _ in sorted(enumerate(np.sum(vec, axis=1)), key=lambda x: x[1], reverse=True)]
+    print((time()-t_start))
     # END SOLUTION
     return jsonify(res)
 
