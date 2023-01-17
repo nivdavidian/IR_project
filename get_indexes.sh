@@ -1,5 +1,9 @@
 BUCKET_NAME="ex3ir205557564"
 
+
+gsutil cp gs://$BUCKET_NAME/pr.csv.gz ~/pr.csv.gz
+rm -f pr.csv
+gunzip pr.csv.gz
 #getting the indexes
 gsutil cp gs://$BUCKET_NAME/title_postings_gcp/title_index.pkl ~/title_index.pkl
 gsutil cp gs://$BUCKET_NAME/anchor_text_postings_gcp/anchor_text_index.pkl ~/anchor_text_index.pkl

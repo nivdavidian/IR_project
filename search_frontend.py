@@ -6,6 +6,8 @@ from corpus_data import CorpusData
 from collections import Counter
 import pickle
 from google.cloud import storage
+import re
+import csv
 
 import nltk
 from nltk.stem.porter import *
@@ -28,8 +30,9 @@ RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
 body_index:InvertedIndex = InvertedIndex.read_index('.', 'body_index')
 title_index:InvertedIndex = InvertedIndex.read_index('.', 'title_index')
 anchor_index:InvertedIndex = InvertedIndex.read_index('.', 'anchor_text_index')
-corpus_d = CorpusData.read_from_blob("corpus_data", "corpus_data.pkl")
+corpus_d:CorpusData = CorpusData.read_from_blob("corpus_data", "corpus_data.pkl")
 corpus_d.read_dls()
+corpus_d.read_pr()
 
 def tokenize(text):
 
@@ -64,12 +67,38 @@ def search():
         list of up to 100 search results, ordered from best to worst where each 
         element is a tuple (wiki_id, title).
     '''
+    t_start = time()
     res = []
     query = request.args.get('query', '')
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    res = [(1, "niv")]
+    
+    title_res_doc = search_title_out_binary(query)
+    query = tokenize(query)
+    b,k = 0.25, 2
+    # title_res_doc = cos_sim(query, title_index,"title_postings_gcp")
+    body_res_doc = bm_25(query,body_index,"body_postings_gcp", k, b)
+    
+    bw, tw= 0.3, 0.7
+    all_res_doc = {}
+    for doc_id in body_res_doc.keys():
+        all_res_doc[doc_id] = bw*body_res_doc[doc_id]    
+    for doc_id, res in title_res_doc.items():
+        if all_res_doc.get(doc_id) == None:
+            all_res_doc[doc_id] = res*tw
+        else:
+            all_res_doc[doc_id] += res*tw
+            
+    
+    # page_rank_res_doc = page_rank_out(all_res_doc.keys())
+    
+    # for doc_id, res in page_rank_res_doc.items():
+    #     all_res_doc[doc_id] += prw*res
+    
+    res = get_top_N(all_res_doc)
+    # res = get_top_N(page_rank_out(all_res_doc.keys()))
+    print(time()-t_start)
     # END SOLUTION
     return jsonify(res)
 
@@ -96,58 +125,12 @@ def search_body():
       return jsonify(res)
     # BEGIN SOLUTION
     query = tokenize(query)
-    unique_query = np.unique(query)
-    N = corpus_d.N
-    pls = [body_index.read_term_pl(q, "body_postings_gcp") for q in unique_query]
-    dl = corpus_d.dl
-    df = body_index.df
-    dis_doc_ids = np.unique([doc_id for pl in pls for (doc_id, _) in pl])
-    doc_id_to_index = {doc_id:index for index, doc_id in enumerate(dis_doc_ids)}
-    query_vec = np.zeros((len(unique_query)))
-    doc_vec = np.zeros((len(dis_doc_ids), len(unique_query)))
-
-    query_counter = Counter(query)
-    for i,q in enumerate(unique_query):
-        idf = np.log(N/len(pls[i]))
-        tf = (query_counter[q]/len(query))
-     #   print(N, len(pls[i]), q, tf, idf)
-        query_vec[i] = tf*idf
-
-    #print("doc length",dl[61073786])
-
-    for i, pl in enumerate(pls):
-        for doc_id, f in pl:
-         #   if doc_id==61073786:
-        #        print("frequency",f, unique_query[i])
-            tf = f/dl[doc_id]
-            idf = np.log(N/len(pl))
-            doc_vec[doc_id_to_index[doc_id]][i] = tf*idf
-
-    print(unique_query)
-    print(query_vec)
     
-    def calc_cosine_sim(Q, D):
-        cos_sim = []
-
-        tf_square = np.sum(np.square(D), axis=1) #shape(d,1)
-        q_square = np.sum(np.square(Q)) #scalar
-        mechane = np.sqrt(tf_square*q_square) #shape(d,1)
-        mone = np.dot(D, Q) #(d,n) dot (n,1) = (d,1)
-        for doc_id, cos in enumerate(mone/mechane):
-            cos_sim.append((dis_doc_ids[doc_id],cos))
-
-        return cos_sim
-
-
-    def get_top_N(Q, D, N=100):
-        res = sorted(calc_cosine_sim(Q,D), key=lambda x: x[1], reverse=True)
-      #  print([i for i in res if i[0] =="61073786"])
-        res = res[:N]
-        res = [(f"{x[0]}", corpus_d.id_to_title[x[0]]) for x in res]
-        return res
+    doc_dict = cos_sim(query, body_index, "body_postings_gcp")
     
-
-    res = get_top_N(query_vec, doc_vec)
+    res = [(doc_id, wij) for doc_id, wij in doc_dict.items()]
+    res = sorted(res, key=lambda x: x[1], reverse=True)[:100]
+    res = [(doc_id, corpus_d.id_to_title[doc_id]) for doc_id,_ in res]
     print(time()-t_start)
     # END SOLUTION
     return jsonify(res)
@@ -179,19 +162,9 @@ def search_title():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    query_unique = frozenset(tokenize(query))
-    num_distinct = len(query_unique)
-    pls = [title_index.read_term_pl(w, "title_postings_gcp") for w in query_unique]
-    doc_ids = np.unique([doc_id for pl in pls for doc_id, _ in pl])
-    d = {doc_id: i for i, doc_id in enumerate(doc_ids)}
-    num_docs = len(doc_ids)
-
-    vec = np.zeros(shape=(num_docs, num_distinct))
-    for i, pl in enumerate(pls):
-        for doc_id,_ in pl:
-            vec[d[doc_id]][i] = 1
+    title_doc = search_title_out_binary(query)
     
-    res = [(f"{doc_ids[i]}", corpus_d.id_to_title[doc_ids[i]]) for i, _ in sorted(enumerate(np.sum(vec, axis=1)), key=lambda x: x[1], reverse=True)]
+    res = [(doc_id, corpus_d.id_to_title[doc_id]) for doc_id, _ in sorted(title_doc, key=lambda x:x[1], reverse=True)]
     print((time()-t_start))
     # END SOLUTION
     return jsonify(res)
@@ -235,7 +208,7 @@ def search_anchor():
         for doc_id,_ in pl:
             vec[d[doc_id]][i] = 1
     
-    res = [(f"{doc_ids[i]}", corpus_d.id_to_title[doc_ids[i]]) for i, _ in sorted(enumerate(np.sum(vec, axis=1)), key=lambda x: x[1], reverse=True)]
+    res = [(int(doc_ids[i]), corpus_d.id_to_title[doc_ids[i]]) for i, _ in sorted(enumerate(np.sum(vec, axis=1)) , key=lambda x: x[1], reverse=True) if doc_ids[i] in corpus_d.id_to_title.keys()]
     print((time()-t_start))
     # END SOLUTION
     return jsonify(res)
@@ -261,7 +234,14 @@ def get_pagerank():
     if len(wiki_ids) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-
+    
+    pr = corpus_d.read_pr()
+    for wiki_id in wiki_ids:
+        if pr.get(f"{wiki_id}") is not None:
+            res.append(pr[f"{wiki_id}"])
+        else:
+            res.append("0")
+    
     # END SOLUTION
     return jsonify(res)
 
@@ -289,21 +269,109 @@ def get_pageview():
       return jsonify(res)
     # BEGIN SOLUTION
     client = storage.Client()
-    print("1")
     bucket = client.bucket(BUCKET_NAME)
-    print("2")
     blob = bucket.blob("page_views/page_views.pkl")
-    print("3")
     with blob.open("rb") as f:
-        print("1")
         pv_file = pickle.load(f)
-    print("4")
     for idd in wiki_ids:
         res.append(pv_file[idd])
     # END SOLUTION
     return jsonify(res)
 
+def bm_25(query, index, folder_name,k,b):
+    N = corpus_d.N
+    k,b = k, b
+    unique_query = np.unique(query)
+    doc_dict = {}
+    avg_dl = sum(corpus_d.dl.values())/N
+    max_bm = 0
+    for q in unique_query:
+        pl = index.read_term_pl(q, folder_name)
+        for (doc_id, fr) in pl:
+            if doc_id not in corpus_d.dl.keys():
+                continue
+            
+            B = 1-b+b*(corpus_d.dl[doc_id]/avg_dl)
+            tf = fr
+            bm = (((k+1)*tf)/(B*k+tf))*np.log((N+1)/index.df[q])
+            if doc_dict.get(doc_id) is None:
+                doc_dict[doc_id] = bm
+            else:
+                doc_dict[doc_id] += bm
+            if bm>max_bm:
+                max_bm = bm
+    
+    for key in doc_dict.keys():
+        doc_dict[key] = doc_dict[key]/max_bm
+    
+    # for doc_id, wij in doc_dict.items():
+    #     doc_dict[doc_id] = wij* (1/len(query))*(1/corpus_d.dl[doc_id])
+    
+    return doc_dict
+
+def cos_sim(query, index, folder_name):
+    N = corpus_d.N
+    unique_query = np.unique(query)
+    doc_dict = {}
+    for q in unique_query:
+        pl = index.read_term_pl(q, folder_name)
+        for (doc_id, fr) in pl:
+            if doc_id not in corpus_d.dl.keys():
+                continue
+            if doc_dict.get(doc_id) is None:
+                doc_dict[doc_id] = fr * np.log(N/body_index.df[q])
+            else:
+                doc_dict[doc_id] += fr * np.log(N/body_index.df[q])
+    
+    for doc_id, wij in doc_dict.items():
+        doc_dict[doc_id] = wij* (1/len(query))*(1/corpus_d.dl[doc_id])
+    
+    return doc_dict
+
+def page_rank_out(wiki_ids):
+    # BEGIN SOLUTION
+    res ={}
+    pr = corpus_d.read_pr()
+    # max = 0
+    for wiki_id in wiki_ids:
+        if pr.get(f"{wiki_id}") is not None:
+            score = float(pr[f"{wiki_id}"])
+            res[wiki_id] = score
+            # if score > max:
+            #     max = score
+    
+    # for key in res.keys():
+    #     res[key] = res[key]/max
+            
+            
+    return res
+            
+
+def search_title_out_binary(query):
+    
+    query_unique = frozenset(tokenize(query))
+    num_distinct = len(query_unique)
+    pls = [title_index.read_term_pl(w, "title_postings_gcp") for w in query_unique]
+    doc_ids = np.unique([doc_id for pl in pls for doc_id, _ in pl])
+    d = {doc_id: i for i, doc_id in enumerate(doc_ids)}
+    num_docs = len(doc_ids)
+
+    vec = np.zeros(shape=(num_docs, num_distinct))
+    for i, pl in enumerate(pls):
+        for doc_id,_ in pl:
+            vec[d[doc_id]][i] = 1
+    
+    vec = np.sum(vec, axis=1)/len(query_unique)
+    return {int(doc_ids[doc_id_index]):res for doc_id_index, res in enumerate(vec)}
+
+def get_top_N(res_dict,N=100):
+    res = sorted([(doc_id, res) for doc_id, res in res_dict.items()], key=lambda x:x[1], reverse=True)
+    #  print([i for i in res if i[0] =="61073786"])
+    N = min(N,len(res))
+    res = res[:N]
+    res = [(x[0], corpus_d.id_to_title[x[0]]) for x in res]
+    return res
 
 if __name__ == '__main__':
     # run the Flask RESTful API, make the server publicly available (host='0.0.0.0') on port 8080
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False)

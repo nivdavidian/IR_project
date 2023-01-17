@@ -189,7 +189,7 @@ class InvertedIndex:
             (1) `name`.pkl containing the global term stats (e.g. df).
         """
         #### GLOBAL DICTIONARIES ####
-        self._write_globalks(base_dir, name)
+        self._write_globals(base_dir, name)
 
     def _write_globals(self, base_dir, name):
         with open(Path(base_dir) / f'{name}.pkl', 'wb') as f:
