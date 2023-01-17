@@ -16,7 +16,7 @@ from nltk.corpus import stopwords
 
 nltk.download('stopwords')
 
-BUCKET_NAME = "ex3ir205557564"
+BUCKET_NAME = "ex3ir205557564" #change to your bucket name
 
 english_stopwords = frozenset(stopwords.words('english'))
 corpus_stopwords = ["category", "references", "also", "external", "links", 
@@ -27,9 +27,10 @@ corpus_stopwords = ["category", "references", "also", "external", "links",
 all_stopwords = english_stopwords.union(corpus_stopwords)
 RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
 
-body_index:InvertedIndex = InvertedIndex.read_index('.', 'body_index')
-title_index:InvertedIndex = InvertedIndex.read_index('.', 'title_index')
-anchor_index:InvertedIndex = InvertedIndex.read_index('.', 'anchor_text_index')
+
+body_index:InvertedIndex = InvertedIndex.read_index('body_postings_gcp/body_index.pkl')
+title_index:InvertedIndex = InvertedIndex.read_index('title_postings_gcp/title_index.pkl')
+anchor_index:InvertedIndex = InvertedIndex.read_index('anchor_text_postings_gcp/anchor_text_index.pkl')
 corpus_d:CorpusData = CorpusData.read_from_blob("corpus_data", "corpus_data.pkl")
 corpus_d.read_dls()
 corpus_d.read_pr()
@@ -164,7 +165,7 @@ def search_title():
     # BEGIN SOLUTION
     title_doc = search_title_out_binary(query)
     
-    res = [(doc_id, corpus_d.id_to_title[doc_id]) for doc_id, _ in sorted(title_doc, key=lambda x:x[1], reverse=True)]
+    res = [(doc_id, corpus_d.id_to_title[doc_id]) for doc_id, _ in sorted(title_doc.items(), key=lambda x:x[1], reverse=True)]
     print((time()-t_start))
     # END SOLUTION
     return jsonify(res)

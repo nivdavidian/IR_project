@@ -227,8 +227,11 @@ class InvertedIndex:
             yield w, posting_list
 
     @staticmethod
-    def read_index(base_dir, name):
-        with open(Path(base_dir) / f'{name}.pkl', 'rb') as f:
+    def read_index(path):
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(path)
+        with blob.open("rb") as f:
             return pickle.load(f)
 
     @staticmethod
